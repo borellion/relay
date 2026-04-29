@@ -37,6 +37,7 @@ pub struct SessionInfo {
 pub struct NewSessionEvent {
     pub app_name: String,
     pub app_url: String,
+    pub app_slug: Option<String>,
 }
 
 #[derive(Clone)]
@@ -47,6 +48,9 @@ pub struct AppState {
     show_adult_content: bool,
     is_custom_page: HashMap<String, bool>,
     sessions: Arc<RwLock<HashMap<String, Vec<SessionInfo>>>>,
+    /// Tracks the last time a NewSessionEvent was broadcast per URL (Unix ms).
+    /// Prevents the ticker from being spammed by fake sessions.
+    session_event_rate_limit: Arc<RwLock<HashMap<String, i64>>>,
     index_hide_apps_with_no_images: bool,
     google_analytics_id: Option<String>,
     new_session_tx: broadcast::Sender<NewSessionEvent>,
@@ -117,6 +121,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // Create in-memory session store for app live counts
     let sessions = Arc::new(RwLock::new(HashMap::<String, Vec<SessionInfo>>::new()));
+    let session_event_rate_limit = Arc::new(RwLock::new(HashMap::<String, i64>::new()));
 
     // Broadcast channel for SSE - browsers subscribe to get notified when users join apps
     let (new_session_tx, _) = broadcast::channel::<NewSessionEvent>(100);
@@ -132,6 +137,7 @@ async fn main() -> Result<(), anyhow::Error> {
             show_adult_content,
             is_custom_page,
             sessions,
+            session_event_rate_limit,
             index_hide_apps_with_no_images,
             google_analytics_id,
             new_session_tx,

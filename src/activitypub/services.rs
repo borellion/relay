@@ -3,6 +3,7 @@ use std::env;
 use std::str::FromStr;
 use std::time::Duration;
 
+use chrono::Utc;
 use rand::Rng;
 
 use activitypub_federation::actix_web::inbox::receive_activity;
@@ -955,12 +956,23 @@ async fn webfinger(query: web::Query<WebfingerQuery>, data: Data<AppState>) -> i
     ))
 }
 
+// How long (ms) to suppress ticker broadcasts for the same URL after one fires.
+const SESSION_BROADCAST_COOLDOWN_MS: i64 = 60_000;
+
 #[post("/session")]
 async fn update_session_info(
     _request: HttpRequest,
     req_body: web::Json<SessionPayload>,
     data: Data<AppState>,
 ) -> HttpResponse {
+    // Reject localhost sessions
+    if let Ok(parsed) = Url::parse(&req_body.url) {
+        let host = parsed.host_str().unwrap_or("");
+        if matches!(host, "localhost" | "127.0.0.1" | "::1" | "0.0.0.0") {
+            return HttpResponse::Forbidden().body("Localhost URLs are not permitted");
+        }
+    }
+
     let session_info = SessionInfo {
         session_id: req_body.session_id.clone(),
         timestamp: req_body.timestamp,
@@ -998,17 +1010,35 @@ async fn update_session_info(
         }
     };
 
-    // Broadcast to SSE subscribers when a new user joins
+    // Broadcast to SSE subscribers when a new user joins, subject to per-URL rate limit.
     if is_new_session {
-        let app_name = match get_app_by_base_url(&data, &req_body.url).await {
-            Ok(Some(app)) => app.name,
-            _ => get_domain(&req_body.url).unwrap_or_else(|| "an app".to_string()),
+        let now = Utc::now().timestamp_millis();
+        let should_broadcast = {
+            let mut rate_limit = match data.session_event_rate_limit.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let last = rate_limit.get(&req_body.url).copied().unwrap_or(0);
+            if now - last >= SESSION_BROADCAST_COOLDOWN_MS {
+                rate_limit.insert(req_body.url.clone(), now);
+                true
+            } else {
+                false
+            }
         };
 
-        let _ = data.new_session_tx.send(NewSessionEvent {
-            app_name,
-            app_url: req_body.url.clone(),
-        });
+        if should_broadcast {
+            let (app_name, app_slug) = match get_app_by_base_url(&data, &req_body.url).await {
+                Ok(Some(app)) => (app.name, app.slug),
+                _ => (get_domain(&req_body.url).unwrap_or_else(|| "an app".to_string()), None),
+            };
+
+            let _ = data.new_session_tx.send(NewSessionEvent {
+                app_name,
+                app_url: req_body.url.clone(),
+                app_slug,
+            });
+        }
     }
 
     HttpResponse::Ok().finish()

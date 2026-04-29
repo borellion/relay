@@ -794,3 +794,117 @@ button:hover, .tile-button:hover {
 .visibility-button:hover {
   transform: translateY(-2px);
 }
+
+/* ── Activity Departure Board ─────────────────────────────────────────────── */
+.activity-board {
+  max-width: 800px;
+  margin: 0 auto 2rem;
+  background: #0a0a0f;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.board-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.board-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.board-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2ed573;
+  box-shadow: 0 0 6px #2ed573;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.board-rows {
+  min-height: 2.8rem;
+  perspective: 400px;
+}
+
+.board-empty {
+  padding: 0.75rem 1rem;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.2);
+  letter-spacing: 0.05em;
+}
+
+.board-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  animation: boardFlipIn 0.35s ease-out;
+  transform-origin: top center;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.board-row:last-child {
+  border-bottom: none;
+}
+
+.board-row-exit {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@keyframes boardFlipIn {
+  from {
+    transform: rotateX(-80deg);
+    opacity: 0;
+  }
+  to {
+    transform: rotateX(0deg);
+    opacity: 1;
+  }
+}
+
+.board-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #667eea;
+  flex-shrink: 0;
+}
+
+.board-world-name {
+  flex: 1;
+  font-size: 0.85rem;
+  color: #f0f0f0;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.03em;
+}
+
+.board-world-name:hover {
+  color: #667eea;
+}
+
+.board-time {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+  letter-spacing: 0.05em;
+}

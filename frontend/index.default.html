@@ -17,8 +17,6 @@
   {% endif %}
 </head>
 <body>
-  <div id="session-notification" class="session-notification"></div>
-
   <header>
     <nav>
       <a href="/" class="nav-brand">🌐 SIGR</a>
@@ -56,8 +54,18 @@
     </section>
 
     <section class="search-container">
-      <input type="text" class="search-box" placeholder="🔍 Search spatial experiences..." 
+      <input type="text" class="search-box" placeholder="🔍 Search spatial experiences..."
              oninput="searchApps(this.value)">
+    </section>
+
+    <section class="activity-board" id="activity-board">
+      <div class="board-header">
+        <span class="board-indicator"></span>
+        <span class="board-title">LIVE ACTIVITY</span>
+      </div>
+      <div class="board-rows" id="activity-board-rows">
+        <div class="board-empty">Waiting for activity...</div>
+      </div>
     </section>
 
     <section class="tiles">
@@ -148,27 +156,74 @@
         .catch(() => {});
     }
 
-    // Real-time updates via SSE
+    // Departure board ticker
     (function() {
-      const banner = document.getElementById('session-notification');
-      let timeout;
+      const MAX_ROWS = 6;
+      const ROW_LIFETIME_MS = 5 * 60 * 1000;
+
+      function timeAgo(ts) {
+        const secs = Math.floor((Date.now() - ts) / 1000);
+        if (secs < 10) return 'just now';
+        if (secs < 60) return secs + 's ago';
+        const mins = Math.floor(secs / 60);
+        if (mins < 60) return mins + 'm ago';
+        return Math.floor(mins / 60) + 'h ago';
+      }
+
+      function addBoardRow(appName, appUrl, appSlug) {
+        const board = document.getElementById('activity-board-rows');
+        const empty = board.querySelector('.board-empty');
+        if (empty) empty.remove();
+
+        const ts = Date.now();
+        const href = appSlug ? '/world/' + appSlug : appUrl;
+
+        const row = document.createElement('div');
+        row.className = 'board-row';
+        row.dataset.ts = ts;
+        row.innerHTML =
+          '<span class="board-dot"></span>' +
+          '<a class="board-world-name" href="' + href + '">' + appName + '</a>' +
+          '<span class="board-time">just now</span>';
+
+        board.insertBefore(row, board.firstChild);
+
+        const rows = board.querySelectorAll('.board-row');
+        if (rows.length > MAX_ROWS) rows[rows.length - 1].remove();
+
+        setTimeout(function() {
+          row.classList.add('board-row-exit');
+          setTimeout(function() {
+            row.remove();
+            if (!board.querySelector('.board-row')) {
+              board.innerHTML = '<div class="board-empty">Waiting for activity...</div>';
+            }
+          }, 400);
+        }, ROW_LIFETIME_MS);
+      }
+
+      // Update all "time ago" labels every 30 seconds
+      setInterval(function() {
+        document.querySelectorAll('.board-row').forEach(function(row) {
+          const timeEl = row.querySelector('.board-time');
+          if (timeEl) timeEl.textContent = timeAgo(parseInt(row.dataset.ts));
+        });
+      }, 30000);
 
       const sse = new EventSource('/events/sessions');
       sse.onmessage = function(e) {
         try {
           const data = JSON.parse(e.data);
-          banner.textContent = `Someone just joined ${data.app_name}`;
-          banner.classList.add('visible');
-          clearTimeout(timeout);
-          timeout = setTimeout(() => banner.classList.remove('visible'), 5000);
 
-          // Increment count locally (no API call needed)
+          addBoardRow(data.app_name, data.app_url, data.app_slug);
+
+          // Increment total online count
           const totalEl = document.getElementById('total-users-online');
           if (totalEl) totalEl.textContent = parseInt(totalEl.textContent || 0) + 1;
 
-          // Find matching tile by name and increment its count
+          // Increment matching tile live count
           const appNameLower = data.app_name.toLowerCase();
-          document.querySelectorAll('.tile').forEach(tile => {
+          document.querySelectorAll('.tile').forEach(function(tile) {
             if (tile.dataset.name === appNameLower) {
               const countEl = tile.querySelector('.live-count-text');
               if (countEl) {
