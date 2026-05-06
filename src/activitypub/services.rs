@@ -1335,7 +1335,7 @@ pub async fn request_world_verification(
         "code": code,
         "url": app.url,
         "instruction": format!(
-            "Add this meta tag to the <head> of your site at {}:\n<meta name=\"zesty-verify\" content=\"{}\">",
+            "Add this meta tag to the <head> of your site at {}:\n<meta name=\"borellion-verify\" content=\"{}\">",
             app.url, code
         )
     }))
@@ -1389,9 +1389,9 @@ pub async fn verify_world_ownership(data: Data<AppState>, path: web::Path<String
         }
     };
 
-    // Parse HTML and look for zesty-verify meta tag
+    // Parse HTML and look for borellion-verify meta tag
     let document = scraper::Html::parse_document(&html);
-    let selector = match scraper::Selector::parse("meta[name=\"zesty-verify\"]") {
+    let selector = match scraper::Selector::parse("meta[name=\"borellion-verify\"]") {
         Ok(s) => s,
         Err(_) => return HttpResponse::InternalServerError().body("Selector parse error"),
     };
@@ -1437,7 +1437,7 @@ pub async fn verify_world_ownership(data: Data<AppState>, path: web::Path<String
         None => HttpResponse::BadRequest().json(serde_json::json!({
             "error": "Meta tag not found",
             "instruction": format!(
-                "Add this to the <head> of {}:\n<meta name=\"zesty-verify\" content=\"{}\">",
+                "Add this to the <head> of {}:\n<meta name=\"borellion-verify\" content=\"{}\">",
                 url, verification_code
             )
         })),

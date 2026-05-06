@@ -293,7 +293,7 @@
 
             if (response.ok) {
               document.getElementById('meta-tag-code').textContent =
-                `<meta name="zesty-verify" content="${data.code}">`;
+                `<meta name="borellion-verify" content="${data.code}">`;
               document.getElementById('step-2').style.display = 'block';
               document.getElementById('step-3').style.display = 'block';
               this.textContent = 'Code Generated';
@@ -345,7 +345,7 @@
         {% if verification_code %}
         // Pre-populate if code already exists
         document.getElementById('meta-tag-code').textContent =
-          `<meta name="zesty-verify" content="{{ verification_code }}">`;
+          `<meta name="borellion-verify" content="{{ verification_code }}">`;
         document.getElementById('step-2').style.display = 'block';
         document.getElementById('step-3').style.display = 'block';
         document.getElementById('get-code-btn').textContent = 'Code Generated';
