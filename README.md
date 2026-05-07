@@ -2,7 +2,7 @@
 
 A federated discovery server for spatial web experiences, built on [ActivityPub](https://activitypub.rocks/). Part of the Distributed Spatial Internet Graph (DSIG).
 
-**Live instance:** [relay.zesty.xyz](https://relay.zesty.xyz)
+**Live instance:** [relay.borellion.com](https://relay.borellion.com)
 
 ## What is a Relay?
 
@@ -42,7 +42,7 @@ World owners can verify ownership and edit their world's details:
 2. Click "Get Verification Code" to receive a unique code
 3. Add the meta tag to your site's `<head>`:
    ```html
-   <meta name="zesty-verify" content="your-code-here">
+   <meta name="borellion-verify" content="your-code-here">
    ```
 4. Click "Verify Ownership"
 5. Once verified, you can edit: name, description, image URL, tags, adult flag
@@ -53,7 +53,7 @@ Verification uses a JWT cookie valid for 7 days.
 
 ```bash
 # Clone the repo
-git clone https://github.com/zestyxyz/relay.git
+git clone https://github.com/borellion/relay.git
 cd relay
 
 # Configure environment
@@ -115,7 +115,6 @@ cargo run -r
 | `DEBUG` | Show localhost URLs (`true`/`false`) |
 | `SHOW_ADULT_CONTENT` | Display adult-flagged apps (`true`/`false`) |
 | `INDEX_HIDE_APPS_WITH_NO_IMAGES` | Hide apps without images on homepage |
-| `GOOGLE_ANALYTICS_ID` | Optional Google Analytics tracking ID (e.g., `G-XXXXXXXXXX`) |
 
 ## Customizing the Frontend
 
@@ -216,9 +215,9 @@ Slugs are auto-generated from world names on registration. Conflicts are handled
 
 ## Documentation
 
-- [DSIG Overview](https://docs.zesty.xyz/graph/overview)
-- [Relay Documentation](https://docs.zesty.xyz/graph/relay/about)
-- [Beacon Integration](https://docs.zesty.xyz/graph/beacon)
+- [DSIG Overview](https://docs.borellion.com/graph/overview)
+- [Relay Documentation](https://docs.borellion.com/graph/relay/about)
+- [Beacon Integration](https://docs.borellion.com/graph/beacon)
 
 ## License
 
