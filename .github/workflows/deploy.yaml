@@ -66,14 +66,14 @@ jobs:
           script: |
             cd ${{ secrets.DIR }}
 
+            # Pull latest code (frontend templates, configs)
+            git pull
+
             # Login to GitHub Container Registry
             echo ${{ secrets.GH_PAT }} | docker login ghcr.io -u ${{ secrets.GH_USERNAME }} --password-stdin
 
-            # Pull the latest image
-            docker pull ghcr.io/borellion/relay:latest
-
-            # Restart with new image
-            docker compose down
+            # Pull the latest image and restart
+            docker compose pull
             docker compose up -d
 
       - name: Wait for deployment
