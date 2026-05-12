@@ -33,10 +33,12 @@
       <h1 class="hero-title">{{ name }}</h1>
       <p class="hero-subtitle">{{ description }}</p>
       
+      {% if is_admin %}
       <div class="live-count-container" style="justify-content: center; margin: 2rem auto; width: fit-content;">
         <div class="live-dot"></div>
         <p class="live-count-text">{{ live_count }} here now</p>
       </div>
+      {% endif %}
 
       <p style="color: #666; font-size: 0.9rem;">
         Indexed: {{ created_at | date(format="%b %d, %Y") }}
