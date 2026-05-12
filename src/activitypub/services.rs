@@ -78,6 +78,11 @@ fn server_fail_screen(e: super::error::Error) -> web::Html {
     web::Html::new("Server has encountered an internal error. Please check again later.")
 }
 
+/// Returns true if the request has a valid admin JWT token cookie
+async fn check_is_admin(request: &HttpRequest, data: &Data<AppState>) -> bool {
+    validate_admin_token(request, data).await.is_ok()
+}
+
 /// Validates admin JWT token from request cookie
 async fn validate_admin_token(request: &HttpRequest, data: &Data<AppState>) -> Result<(), HttpResponse> {
     let cookie = request.cookie("relay-admin-token");
@@ -122,7 +127,8 @@ struct AppWithCount {
 }
 
 #[get("/")]
-async fn index(data: Data<AppState>) -> impl Responder {
+async fn index(request: HttpRequest, data: Data<AppState>) -> impl Responder {
+    let is_admin = check_is_admin(&request, &data).await;
     let template_path = get_template_path(&data, "index");
     match get_all_apps(&data).await {
         Ok(mut apps) => {
@@ -206,6 +212,7 @@ async fn index(data: Data<AppState>) -> impl Responder {
             ctx.insert("total_users_online", &total_users_online);
 
             ctx.insert("apps", &apps_to_display);
+            ctx.insert("is_admin", &is_admin);
             ctx.insert("google_analytics_id", &data.google_analytics_id);
 
             match data.tera.render(&template_path, &ctx) {
@@ -233,7 +240,8 @@ struct ApiAppsResponse {
 }
 
 #[get("/api/apps")]
-pub async fn api_get_apps(data: Data<AppState>) -> impl Responder {
+pub async fn api_get_apps(request: HttpRequest, data: Data<AppState>) -> impl Responder {
+    let is_admin = check_is_admin(&request, &data).await;
     match get_all_apps(&data).await {
         Ok(mut apps) => {
             // Filter apps
@@ -299,14 +307,14 @@ pub async fn api_get_apps(data: Data<AppState>) -> impl Responder {
                     name: app.name,
                     url: normalize_app_url(app.url),
                     image: app.image,
-                    live_count,
+                    live_count: if is_admin { live_count } else { 0 },
                 })
                 .collect();
 
             HttpResponse::Ok().json(ApiAppsResponse {
                 apps: api_apps,
                 total_apps,
-                total_users_online,
+                total_users_online: if is_admin { total_users_online } else { 0 },
             })
         }
         Err(e) => {
@@ -591,16 +599,17 @@ async fn new_beacon(
 }
 
 #[get("/world/{id_or_slug}")]
-pub async fn get_world(data: Data<AppState>, path: web::Path<String>) -> impl Responder {
-    get_app_handler(data, path).await
+pub async fn get_world(request: HttpRequest, data: Data<AppState>, path: web::Path<String>) -> impl Responder {
+    get_app_handler(request, data, path).await
 }
 
 #[get("/app/{id_or_slug}")]
-async fn get_app(data: Data<AppState>, path: web::Path<String>) -> impl Responder {
-    get_app_handler(data, path).await
+async fn get_app(request: HttpRequest, data: Data<AppState>, path: web::Path<String>) -> impl Responder {
+    get_app_handler(request, data, path).await
 }
 
-async fn get_app_handler(data: Data<AppState>, path: web::Path<String>) -> impl Responder {
+async fn get_app_handler(request: HttpRequest, data: Data<AppState>, path: web::Path<String>) -> impl Responder {
+    let is_admin = check_is_admin(&request, &data).await;
     let template_path = get_template_path(&data, "app");
     let error_path = get_template_path(&data, "error");
 
@@ -642,6 +651,7 @@ async fn get_app_handler(data: Data<AppState>, path: web::Path<String>) -> impl 
             ctx.insert("url", &url);
             ctx.insert("image", &app.image);
             ctx.insert("live_count", &live_count);
+            ctx.insert("is_admin", &is_admin);
             ctx.insert("created_at", &app.created_at);
             ctx.insert("slug", &app.slug);
             ctx.insert("app_id", &app.id);
@@ -661,16 +671,17 @@ async fn get_app_handler(data: Data<AppState>, path: web::Path<String>) -> impl 
 }
 
 #[get("/worlds")]
-pub async fn get_worlds(data: Data<AppState>) -> impl Responder {
-    get_apps_handler(data).await
+pub async fn get_worlds(request: HttpRequest, data: Data<AppState>) -> impl Responder {
+    get_apps_handler(request, data).await
 }
 
 #[get("/apps")]
-async fn get_apps(data: Data<AppState>) -> impl Responder {
-    get_apps_handler(data).await
+async fn get_apps(request: HttpRequest, data: Data<AppState>) -> impl Responder {
+    get_apps_handler(request, data).await
 }
 
-async fn get_apps_handler(data: Data<AppState>) -> impl Responder {
+async fn get_apps_handler(request: HttpRequest, data: Data<AppState>) -> impl Responder {
+    let is_admin = check_is_admin(&request, &data).await;
     let template_path = get_template_path(&data, "apps");
     let error_path = get_template_path(&data, "error");
     match get_all_apps(&data).await {
@@ -714,6 +725,7 @@ async fn get_apps_handler(data: Data<AppState>) -> impl Responder {
             ctx.insert("apps", &app_groups);
             ctx.insert("domains", &domains);
             ctx.insert("app_pages", &app_page_urls);
+            ctx.insert("is_admin", &is_admin);
             ctx.insert("DEBUG", &data.debug);
             ctx.insert("SHOW_ADULT_CONTENT", &data.show_adult_content);
             match data.tera.render(&template_path, &ctx) {
@@ -1016,7 +1028,10 @@ async fn update_session_info(
 
 /// SSE endpoint for browsers to receive real-time session notifications
 #[get("/events/sessions")]
-pub async fn session_events(data: Data<AppState>) -> HttpResponse {
+pub async fn session_events(request: HttpRequest, data: Data<AppState>) -> HttpResponse {
+    if let Err(response) = validate_admin_token(&request, &data).await {
+        return response;
+    }
     let mut rx = data.new_session_tx.subscribe();
 
     let stream = async_stream::stream! {

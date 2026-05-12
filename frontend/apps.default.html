@@ -158,6 +158,7 @@
     // Filter out apps initially on page load
     filterAdultApps();
 
+    {% if is_admin %}
     // Real-time notifications when users join apps
     (function() {
       const banner = document.getElementById('session-notification');
@@ -174,6 +175,7 @@
         } catch (err) {}
       };
     })();
+    {% endif %}
   </script>
 </body>
 </html>
