@@ -295,9 +295,6 @@ pub async fn api_get_apps(request: HttpRequest, data: Data<AppState>) -> impl Re
             // Sort by live count descending
             app_to_live_count.sort_by(|a, b| b.1.cmp(&a.1));
 
-            // Take top 10
-            app_to_live_count.truncate(10);
-
             let total_users_online: usize = sessions.values().map(|s| s.len()).sum();
             let total_apps = unique_urls.len();
 
