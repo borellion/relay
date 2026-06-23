@@ -85,6 +85,7 @@ impl DbApp {
             tags,
             visible,
             created_at,
+            content_type: "world".to_string(),
             slug: None,
             verification_code: None,
             verified_at: None,
