@@ -29,6 +29,7 @@ pub struct DbApp {
     pub tags: String,
     pub visible: bool,
     pub created_at: DateTime<Utc>,
+    pub content_type: String,
     // New fields for world management features
     pub slug: Option<String>,
     pub verification_code: Option<String>,
@@ -50,6 +51,7 @@ impl FromRow<'_, sqlx::postgres::PgRow> for DbApp {
             tags: row.try_get("tags")?,
             visible: row.try_get("visible")?,
             created_at: row.try_get("created_at")?,
+            content_type: row.try_get("content_type")?,
             slug: row.try_get("slug")?,
             verification_code: row.try_get("verification_code")?,
             verified_at: row.try_get("verified_at")?,
@@ -242,6 +244,7 @@ impl Object for DbApp {
             tags: json.tags,
             visible: true,
             created_at: Utc::now(),
+            content_type: "world".to_string(),
             slug: None,
             verification_code: None,
             verified_at: None,
