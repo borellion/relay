@@ -55,6 +55,14 @@
               </div>
             </div>
             <div style="display:flex;gap:0.5rem;align-items:center;">
+              <form action="/admin/set-content-type" method="post" class="visibility-form">
+                <input type="hidden" name="app_id" value="{{ app.id }}">
+                <select name="content_type" onchange="this.form.submit()" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #ccc;font-size:0.85rem;">
+                  <option value="world" {% if app.content_type == "world" %}selected{% endif %}>🌐 World</option>
+                  <option value="page" {% if app.content_type == "page" %}selected{% endif %}>📄 Page</option>
+                  <option value="profile" {% if app.content_type == "profile" %}selected{% endif %}>👤 Profile</option>
+                </select>
+              </form>
               <form action="/admin/togglevisible" method="post" class="visibility-form">
                 {% if app.visible %}
                   <button type="submit" name="app_id" value="{{ app.id }}"

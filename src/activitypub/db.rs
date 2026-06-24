@@ -72,9 +72,10 @@ pub async fn create_app(
     image_url: String,
     is_adult: bool,
     tags: String,
+    content_type: String,
 ) -> Result<(), Error> {
     let db = &data.db;
-    sqlx::query("INSERT INTO apps (activitypub_id, url, name, description, is_active, image, is_adult, tags) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)")
+    sqlx::query("INSERT INTO apps (activitypub_id, url, name, description, is_active, image, is_adult, tags, content_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)")
         .bind(activitypub_id)
         .bind(url)
         .bind(name)
@@ -83,6 +84,7 @@ pub async fn create_app(
         .bind(image_url)
         .bind(is_adult)
         .bind(tags)
+        .bind(content_type)
         .execute(db)
         .await?;
     Ok(())
@@ -97,10 +99,11 @@ pub async fn update_app(
     image_url: String,
     is_adult: bool,
     tags: String,
+    content_type: String,
 ) -> Result<(), Error> {
     let db = &data.db;
     sqlx::query(
-        "UPDATE apps SET name = $1, description = $2, is_active = $3, image = $4, is_adult = $5, tags = $6 WHERE url = $7",
+        "UPDATE apps SET name = $1, description = $2, is_active = $3, image = $4, is_adult = $5, tags = $6, content_type = $7 WHERE url = $8",
     )
     .bind(name)
     .bind(description)
@@ -108,9 +111,20 @@ pub async fn update_app(
     .bind(image_url)
     .bind(is_adult)
     .bind(tags)
+    .bind(content_type)
     .bind(url)
     .execute(db)
     .await?;
+    Ok(())
+}
+
+pub async fn set_app_content_type(id: i32, content_type: String, data: &Data<AppState>) -> Result<(), Error> {
+    let db = &data.db;
+    sqlx::query("UPDATE apps SET content_type = $1 WHERE id = $2")
+        .bind(content_type)
+        .bind(id)
+        .execute(db)
+        .await?;
     Ok(())
 }
 

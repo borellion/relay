@@ -30,7 +30,7 @@ use super::db::{
     create_activity, create_app, get_activities_count, get_activity_by_id, get_all_apps,
     get_all_relays, get_app_by_base_url, get_app_by_id, get_app_by_slug, get_apps_count,
     get_relay_by_id, get_relay_followers, get_system_user, mark_app_verified, set_app_slug,
-    delete_app, set_verification_code, slug_exists, toggle_app_visibility, update_app, update_app_details,
+    delete_app, set_app_content_type, set_verification_code, slug_exists, toggle_app_visibility, update_app, update_app_details,
 };
 use crate::{AppState, NewSessionEvent, SessionInfo};
 
@@ -43,6 +43,7 @@ pub struct BeaconPayload {
     pub image: Option<String>,
     pub adult: Option<bool>,
     pub tags: Option<String>,
+    pub content_type: Option<String>,
 }
 
 
@@ -251,7 +252,10 @@ pub async fn api_get_apps(request: HttpRequest, data: Data<AppState>) -> impl Re
             if data.index_hide_apps_with_no_images {
                 apps.retain(|app| app.image != "#");
             }
-            apps.retain(|app| app.visible);
+            if !is_admin {
+                apps.retain(|app| app.visible);
+                apps.retain(|app| app.content_type == "world");
+            }
 
             // Deduplicate by hostname
             let mut unique_urls = HashSet::new();
@@ -395,6 +399,7 @@ async fn new_beacon(
     let image = req_body.image.clone().unwrap_or("#".to_string());
     let adult = req_body.adult.unwrap_or(false);
     let tags = req_body.tags.clone().unwrap_or("".to_string());
+    let content_type = req_body.content_type.clone().unwrap_or("world".to_string());
 
     // Query system user and DB information
     let system_user = match get_system_user(&data).await {
@@ -437,6 +442,7 @@ async fn new_beacon(
             };
             let app_adult = get_latest_value(app.adult, adult);
             let app_tags = get_latest_value(app.tags.clone(), tags.clone());
+            let app_content_type = get_latest_value(app.content_type.clone(), content_type.clone());
 
             // Parse optionally attached image to see if we need to save a copy locally
             let image = if app.image != image && app_image.contains("data:") {
@@ -463,6 +469,7 @@ async fn new_beacon(
                 && image == app.image
                 && app_adult == app.adult
                 && app_tags == app.tags
+                && app_content_type == app.content_type
             {
                 return HttpResponse::NotModified().finish();
             }
@@ -476,6 +483,7 @@ async fn new_beacon(
                 image,
                 app_adult,
                 app_tags.clone(),
+                app_content_type.clone(),
             )
             .await
             {
@@ -560,6 +568,7 @@ async fn new_beacon(
         image_url,
         adult,
         tags.clone(),
+        content_type,
     )
     .await
     {
@@ -682,7 +691,11 @@ async fn get_apps_handler(request: HttpRequest, data: Data<AppState>) -> impl Re
     let template_path = get_template_path(&data, "apps");
     let error_path = get_template_path(&data, "error");
     match get_all_apps(&data).await {
-        Ok(apps) => {
+        Ok(mut apps) => {
+            if !is_admin {
+                apps.retain(|app| app.visible);
+                apps.retain(|app| app.content_type == "world");
+            }
             // First deduplicate by base URL (ignoring query parameters)
             let mut seen_base_urls: HashSet<String> = HashSet::new();
             let mut deduplicated_apps: Vec<DbApp> = Vec::new();
@@ -1106,6 +1119,41 @@ async fn admin_toggle_visible(
     }
 
     match toggle_app_visibility(req_body.app_id, &data).await {
+        Ok(_) => {
+            let template_path = get_template_path(&data, "admin");
+            match get_all_apps(&data).await {
+                Ok(apps) => {
+                    let mut ctx = tera::Context::new();
+                    ctx.insert("apps", &apps);
+                    match data.tera.render(&template_path, &ctx) {
+                        Ok(html) => HttpResponse::Ok().body(html),
+                        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+                    }
+                }
+                Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+            }
+        }
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct SetContentTypePayload {
+    app_id: i32,
+    content_type: String,
+}
+
+#[post("/admin/set-content-type")]
+async fn admin_set_content_type(
+    request: HttpRequest,
+    req_body: web::Form<SetContentTypePayload>,
+    data: Data<AppState>,
+) -> HttpResponse {
+    if let Err(response) = validate_admin_token(&request, &data).await {
+        return response;
+    }
+
+    match set_app_content_type(req_body.app_id, req_body.content_type.clone(), &data).await {
         Ok(_) => {
             let template_path = get_template_path(&data, "admin");
             match get_all_apps(&data).await {
