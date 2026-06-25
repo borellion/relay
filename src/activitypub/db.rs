@@ -118,6 +118,15 @@ pub async fn update_app(
     Ok(())
 }
 
+pub async fn delete_apps_bulk(ids: Vec<i32>, data: &Data<AppState>) -> Result<(), Error> {
+    let db = &data.db;
+    sqlx::query("DELETE FROM apps WHERE id = ANY($1)")
+        .bind(&ids)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 pub async fn set_app_content_type(id: i32, content_type: String, data: &Data<AppState>) -> Result<(), Error> {
     let db = &data.db;
     sqlx::query("UPDATE apps SET content_type = $1 WHERE id = $2")
