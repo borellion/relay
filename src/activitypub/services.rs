@@ -30,7 +30,7 @@ use super::db::{
     create_activity, create_app, get_activities_count, get_activity_by_id, get_all_apps,
     get_all_relays, get_app_by_base_url, get_app_by_id, get_app_by_slug, get_apps_count,
     get_relay_by_id, get_relay_followers, get_system_user, mark_app_verified, set_app_slug,
-    delete_app, set_app_content_type, set_verification_code, slug_exists, toggle_app_visibility, update_app, update_app_details,
+    delete_app, delete_apps_bulk, set_app_content_type, set_verification_code, slug_exists, toggle_app_visibility, update_app, update_app_details,
 };
 use crate::{AppState, NewSessionEvent, SessionInfo};
 
@@ -1154,6 +1154,49 @@ async fn admin_set_content_type(
     }
 
     match set_app_content_type(req_body.app_id, req_body.content_type.clone(), &data).await {
+        Ok(_) => {
+            let template_path = get_template_path(&data, "admin");
+            match get_all_apps(&data).await {
+                Ok(apps) => {
+                    let mut ctx = tera::Context::new();
+                    ctx.insert("apps", &apps);
+                    match data.tera.render(&template_path, &ctx) {
+                        Ok(html) => HttpResponse::Ok().body(html),
+                        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+                    }
+                }
+                Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+            }
+        }
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct BulkDeletePayload {
+    app_ids: String,
+}
+
+#[post("/admin/bulk-delete")]
+async fn admin_bulk_delete(
+    request: HttpRequest,
+    req_body: web::Form<BulkDeletePayload>,
+    data: Data<AppState>,
+) -> HttpResponse {
+    if let Err(response) = validate_admin_token(&request, &data).await {
+        return response;
+    }
+
+    let ids: Vec<i32> = req_body.app_ids
+        .split(',')
+        .filter_map(|s| s.trim().parse::<i32>().ok())
+        .collect();
+
+    if ids.is_empty() {
+        return HttpResponse::BadRequest().body("No valid IDs provided");
+    }
+
+    match delete_apps_bulk(ids, &data).await {
         Ok(_) => {
             let template_path = get_template_path(&data, "admin");
             match get_all_apps(&data).await {
