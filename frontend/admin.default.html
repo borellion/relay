@@ -44,10 +44,25 @@
 
       <section class="search-container admin-section">
         <h2 class="admin-section-title">👁️ World Visibility</h2>
+
+        <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:0.4rem;font-weight:600;cursor:pointer;">
+            <input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"> Select all
+          </label>
+          <button onclick="submitBulkDelete()" class="visibility-button hidden" style="padding:0.3rem 0.8rem;">
+            🗑️ Delete Selected
+          </button>
+        </div>
+
+        <form id="bulk-delete-form" action="/admin/bulk-delete" method="post">
+          <input type="hidden" name="app_ids" id="bulk-app-ids">
+        </form>
+
         <div class="app-visibility-list">
           {% for app in apps %}
           <div class="app-visibility-item">
             <div class="app-info">
+              <input type="checkbox" class="bulk-checkbox" value="{{ app.id }}" style="margin-right:0.4rem;flex-shrink:0;">
               <span class="app-id">#{{ app.id }}</span>
               <div style="display:flex;flex-direction:column;gap:0.1rem;min-width:0;">
                 <span style="font-weight:600;">{{ app.name }}</span>
@@ -88,6 +103,20 @@
           {% endfor %}
         </div>
       </section>
+
+  <script>
+    function toggleSelectAll(source) {
+      document.querySelectorAll('.bulk-checkbox').forEach(cb => cb.checked = source.checked);
+    }
+
+    function submitBulkDelete() {
+      const checked = [...document.querySelectorAll('.bulk-checkbox:checked')];
+      if (checked.length === 0) { alert('No worlds selected.'); return; }
+      if (!confirm(`Delete ${checked.length} world(s)? This cannot be undone.`)) return;
+      document.getElementById('bulk-app-ids').value = checked.map(cb => cb.value).join(',');
+      document.getElementById('bulk-delete-form').submit();
+    }
+  </script>
     </div>
   </main>
 </body>
