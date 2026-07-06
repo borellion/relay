@@ -4,6 +4,7 @@ use sqlx::Row;
 use super::activities::DbActivity;
 use super::actors::DbRelay;
 use super::apps::DbApp;
+use super::beacon_origins::{DbAllowedBeaconOrigin, DbBeaconOriginAttempt};
 use super::error::Error;
 use crate::AppState;
 
@@ -376,4 +377,125 @@ pub async fn get_apps_without_slugs(data: &Data<AppState>) -> Result<Vec<DbApp>,
     .fetch_all(db)
     .await?;
     Ok(apps)
+}
+
+// ============================================================================
+// Beacon Origin Allowlisting
+// ============================================================================
+
+/// Returns true if `origin_host` has been explicitly approved to register
+/// beacons on behalf of `target_host`.
+pub async fn is_beacon_origin_allowed(
+    origin_host: &str,
+    target_host: &str,
+    data: &Data<AppState>,
+) -> Result<bool, Error> {
+    let db = &data.db;
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM beacon_allowed_origins WHERE origin_host = $1 AND target_host = $2",
+    )
+    .bind(origin_host)
+    .bind(target_host)
+    .fetch_one(db)
+    .await?;
+    Ok(count > 0)
+}
+
+/// Records a rejected beacon attempt, upserting the attempt/last-seen count
+/// if this (origin_host, target_host) pair has already been seen before.
+pub async fn record_beacon_origin_attempt(
+    origin_host: &str,
+    target_host: &str,
+    example_url: &str,
+    data: &Data<AppState>,
+) -> Result<(), Error> {
+    let db = &data.db;
+    sqlx::query(
+        "INSERT INTO beacon_origin_attempts (origin_host, target_host, example_url) \
+         VALUES ($1, $2, $3) \
+         ON CONFLICT (origin_host, target_host) DO UPDATE SET \
+             attempt_count = beacon_origin_attempts.attempt_count + 1, \
+             example_url = EXCLUDED.example_url, \
+             last_seen = NOW(), \
+             resolved = FALSE",
+    )
+    .bind(origin_host)
+    .bind(target_host)
+    .bind(example_url)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Returns unresolved beacon origin attempts, most recently seen first.
+pub async fn get_pending_beacon_origin_attempts(
+    data: &Data<AppState>,
+) -> Result<Vec<DbBeaconOriginAttempt>, Error> {
+    let db = &data.db;
+    let attempts = sqlx::query_as::<_, DbBeaconOriginAttempt>(
+        "SELECT * FROM beacon_origin_attempts WHERE resolved = FALSE ORDER BY last_seen DESC",
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(attempts)
+}
+
+/// Approves an (origin_host, target_host) pair, adding it to the allowlist
+/// and marking any matching pending attempt as resolved.
+pub async fn allow_beacon_origin(
+    origin_host: &str,
+    target_host: &str,
+    data: &Data<AppState>,
+) -> Result<(), Error> {
+    let db = &data.db;
+    sqlx::query(
+        "INSERT INTO beacon_allowed_origins (origin_host, target_host) VALUES ($1, $2) \
+         ON CONFLICT (origin_host, target_host) DO NOTHING",
+    )
+    .bind(origin_host)
+    .bind(target_host)
+    .execute(db)
+    .await?;
+    sqlx::query(
+        "UPDATE beacon_origin_attempts SET resolved = TRUE \
+         WHERE origin_host = $1 AND target_host = $2",
+    )
+    .bind(origin_host)
+    .bind(target_host)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Dismisses a pending attempt without allowlisting it (e.g. it looks like spam/abuse).
+pub async fn dismiss_beacon_origin_attempt(id: i32, data: &Data<AppState>) -> Result<(), Error> {
+    let db = &data.db;
+    sqlx::query("UPDATE beacon_origin_attempts SET resolved = TRUE WHERE id = $1")
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// Returns all explicitly-allowed beacon origins, most recently added first.
+pub async fn get_allowed_beacon_origins(
+    data: &Data<AppState>,
+) -> Result<Vec<DbAllowedBeaconOrigin>, Error> {
+    let db = &data.db;
+    let origins = sqlx::query_as::<_, DbAllowedBeaconOrigin>(
+        "SELECT * FROM beacon_allowed_origins ORDER BY created_at DESC",
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(origins)
+}
+
+/// Revokes a previously-allowed beacon origin by id.
+pub async fn revoke_allowed_beacon_origin(id: i32, data: &Data<AppState>) -> Result<(), Error> {
+    let db = &data.db;
+    sqlx::query("DELETE FROM beacon_allowed_origins WHERE id = $1")
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
 }
