@@ -31,6 +31,9 @@ use super::db::{
     get_all_relays, get_app_by_base_url, get_app_by_id, get_app_by_slug, get_apps_count,
     get_relay_by_id, get_relay_followers, get_system_user, mark_app_verified, set_app_slug,
     delete_app, delete_apps_bulk, set_app_content_type, set_verification_code, slug_exists, toggle_app_visibility, update_app, update_app_details,
+    allow_beacon_origin, dismiss_beacon_origin_attempt, get_allowed_beacon_origins,
+    get_pending_beacon_origin_attempts, is_beacon_origin_allowed, record_beacon_origin_attempt,
+    revoke_allowed_beacon_origin,
 };
 use crate::{AppState, NewSessionEvent, SessionInfo};
 
@@ -376,18 +379,35 @@ async fn new_beacon(
         }
     }
 
-    // Validate that the Origin header matches the URL being registered
+    // Validate that the Origin header matches the URL being registered.
     // This ensures browsers can only register the domain they're actually running on
+    // -- with an exception for origins an admin has explicitly allowlisted (e.g.
+    // legitimate cross-origin iframe integrations, where the executing frame's
+    // origin will never match the page's canonical URL).
     if let Some(origin_header) = req.headers().get("Origin") {
         if let Ok(origin_str) = origin_header.to_str() {
             if let (Ok(origin_url), Ok(payload_url)) = (Url::parse(origin_str), Url::parse(&url)) {
                 // Compare hosts, stripping www. prefix for flexibility
-                let origin_host = origin_url.host_str().unwrap_or("").trim_start_matches("www.");
-                let payload_host = payload_url.host_str().unwrap_or("").trim_start_matches("www.");
+                let origin_host = origin_url.host_str().unwrap_or("").trim_start_matches("www.").to_string();
+                let payload_host = payload_url.host_str().unwrap_or("").trim_start_matches("www.").to_string();
                 if origin_host != payload_host {
-                    eprintln!("Beacon rejected: Origin '{}' does not match URL '{}'", origin_str, url);
-                    return HttpResponse::Forbidden()
-                        .body("Origin header does not match the URL being registered");
+                    let allowed = is_beacon_origin_allowed(&origin_host, &payload_host, &data)
+                        .await
+                        .unwrap_or(false);
+                    if !allowed {
+                        eprintln!("Beacon rejected: Origin '{}' does not match URL '{}'", origin_str, url);
+                        if let Err(e) =
+                            record_beacon_origin_attempt(&origin_host, &payload_host, &url, &data).await
+                        {
+                            eprintln!("Error recording beacon origin attempt: {}", e);
+                        }
+                        return HttpResponse::Forbidden()
+                            .body("Origin header does not match the URL being registered");
+                    }
+                    println!(
+                        "Beacon allowed via allowlisted origin: '{}' registering for '{}'",
+                        origin_str, url
+                    );
                 }
             }
         }
@@ -919,10 +939,37 @@ async fn get_image(request: HttpRequest, _data: Data<AppState>) -> impl Responde
     HttpResponse::Ok().content_type(mime).body(image)
 }
 
+/// Builds the full admin page (apps list, pending beacon origin attempts, and
+/// allowed beacon origins) and renders it. Shared by every admin action that
+/// redisplays the admin panel after making a change.
+async fn render_admin_page(data: &Data<AppState>) -> HttpResponse {
+    let template_path = get_template_path(data, "admin");
+
+    let apps = match get_all_apps(data).await {
+        Ok(apps) => apps,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+    let pending_beacon_attempts = match get_pending_beacon_origin_attempts(data).await {
+        Ok(attempts) => attempts,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+    let allowed_beacon_origins = match get_allowed_beacon_origins(data).await {
+        Ok(origins) => origins,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+
+    let mut ctx = tera::Context::new();
+    ctx.insert("apps", &apps);
+    ctx.insert("pending_beacon_attempts", &pending_beacon_attempts);
+    ctx.insert("allowed_beacon_origins", &allowed_beacon_origins);
+    match data.tera.render(&template_path, &ctx) {
+        Ok(html) => HttpResponse::Ok().body(html),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
 #[get("/admin")]
 async fn admin_page(request: HttpRequest, data: Data<AppState>) -> impl Responder {
-    let template_path = get_template_path(&data, "admin");
-
     // Validate JWT token
     if let Err(response) = validate_admin_token(&request, &data).await {
         // If no token at all, redirect to login
@@ -934,17 +981,7 @@ async fn admin_page(request: HttpRequest, data: Data<AppState>) -> impl Responde
         return response;
     }
 
-    match get_all_apps(&data).await {
-        Ok(apps) => {
-            let mut ctx = tera::Context::new();
-            ctx.insert("apps", &apps);
-            match data.tera.render(&template_path, &ctx) {
-                Ok(html) => HttpResponse::Ok().body(html),
-                Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-            }
-        }
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-    }
+    render_admin_page(&data).await
 }
 
 #[derive(Deserialize)]
@@ -1119,20 +1156,7 @@ async fn admin_toggle_visible(
     }
 
     match toggle_app_visibility(req_body.app_id, &data).await {
-        Ok(_) => {
-            let template_path = get_template_path(&data, "admin");
-            match get_all_apps(&data).await {
-                Ok(apps) => {
-                    let mut ctx = tera::Context::new();
-                    ctx.insert("apps", &apps);
-                    match data.tera.render(&template_path, &ctx) {
-                        Ok(html) => HttpResponse::Ok().body(html),
-                        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-                    }
-                }
-                Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-            }
-        }
+        Ok(_) => render_admin_page(&data).await,
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
@@ -1154,20 +1178,7 @@ async fn admin_set_content_type(
     }
 
     match set_app_content_type(req_body.app_id, req_body.content_type.clone(), &data).await {
-        Ok(_) => {
-            let template_path = get_template_path(&data, "admin");
-            match get_all_apps(&data).await {
-                Ok(apps) => {
-                    let mut ctx = tera::Context::new();
-                    ctx.insert("apps", &apps);
-                    match data.tera.render(&template_path, &ctx) {
-                        Ok(html) => HttpResponse::Ok().body(html),
-                        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-                    }
-                }
-                Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-            }
-        }
+        Ok(_) => render_admin_page(&data).await,
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
@@ -1197,20 +1208,7 @@ async fn admin_bulk_delete(
     }
 
     match delete_apps_bulk(ids, &data).await {
-        Ok(_) => {
-            let template_path = get_template_path(&data, "admin");
-            match get_all_apps(&data).await {
-                Ok(apps) => {
-                    let mut ctx = tera::Context::new();
-                    ctx.insert("apps", &apps);
-                    match data.tera.render(&template_path, &ctx) {
-                        Ok(html) => HttpResponse::Ok().body(html),
-                        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-                    }
-                }
-                Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-            }
-        }
+        Ok(_) => render_admin_page(&data).await,
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
@@ -1226,20 +1224,66 @@ pub async fn admin_delete_world(
     }
 
     match delete_app(req_body.app_id, &data).await {
-        Ok(_) => {
-            let template_path = get_template_path(&data, "admin");
-            match get_all_apps(&data).await {
-                Ok(apps) => {
-                    let mut ctx = tera::Context::new();
-                    ctx.insert("apps", &apps);
-                    match data.tera.render(&template_path, &ctx) {
-                        Ok(html) => HttpResponse::Ok().body(html),
-                        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-                    }
-                }
-                Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-            }
-        }
+        Ok(_) => render_admin_page(&data).await,
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct BeaconOriginPayload {
+    origin_host: String,
+    target_host: String,
+}
+
+#[post("/admin/beacon-origins/allow")]
+async fn admin_allow_beacon_origin(
+    request: HttpRequest,
+    req_body: web::Form<BeaconOriginPayload>,
+    data: Data<AppState>,
+) -> HttpResponse {
+    if let Err(response) = validate_admin_token(&request, &data).await {
+        return response;
+    }
+
+    match allow_beacon_origin(&req_body.origin_host, &req_body.target_host, &data).await {
+        Ok(_) => render_admin_page(&data).await,
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct BeaconOriginAttemptIdPayload {
+    id: i32,
+}
+
+#[post("/admin/beacon-origins/dismiss")]
+async fn admin_dismiss_beacon_origin(
+    request: HttpRequest,
+    req_body: web::Form<BeaconOriginAttemptIdPayload>,
+    data: Data<AppState>,
+) -> HttpResponse {
+    if let Err(response) = validate_admin_token(&request, &data).await {
+        return response;
+    }
+
+    match dismiss_beacon_origin_attempt(req_body.id, &data).await {
+        Ok(_) => render_admin_page(&data).await,
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
+#[post("/admin/beacon-origins/revoke")]
+async fn admin_revoke_beacon_origin(
+    request: HttpRequest,
+    req_body: web::Form<BeaconOriginAttemptIdPayload>,
+    data: Data<AppState>,
+) -> HttpResponse {
+    if let Err(response) = validate_admin_token(&request, &data).await {
+        return response;
+    }
+
+    match revoke_allowed_beacon_origin(req_body.id, &data).await {
+        Ok(_) => render_admin_page(&data).await,
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }

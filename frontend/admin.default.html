@@ -103,6 +103,66 @@
           {% endfor %}
         </div>
       </section>
+
+      <section class="search-container admin-section">
+        <h2 class="admin-section-title">🚫 Pending Beacon Origins</h2>
+        <p style="font-size:0.85rem;color:#666;margin-bottom:0.75rem;">
+          Beacon PUTs rejected because the request's Origin didn't match the registered URL
+          (common for legitimate cross-origin iframe integrations). Allow a pair to let it through.
+        </p>
+        {% if pending_beacon_attempts | length == 0 %}
+        <p style="font-size:0.85rem;color:#888;">No pending beacon origin attempts.</p>
+        {% else %}
+        <div class="app-visibility-list">
+          {% for attempt in pending_beacon_attempts %}
+          <div class="app-visibility-item">
+            <div class="app-info">
+              <div style="display:flex;flex-direction:column;gap:0.1rem;min-width:0;">
+                <span style="font-weight:600;">{{ attempt.origin_host }} → {{ attempt.target_host }}</span>
+                <span style="font-size:0.8rem;color:#666;word-break:break-all;">{{ attempt.example_url }}</span>
+                <span style="font-size:0.75rem;color:#888;">
+                  seen {{ attempt.attempt_count }}x · last {{ attempt.last_seen }}
+                </span>
+              </div>
+            </div>
+            <div style="display:flex;gap:0.5rem;align-items:center;">
+              <form action="/admin/beacon-origins/allow" method="post" class="visibility-form">
+                <input type="hidden" name="origin_host" value="{{ attempt.origin_host }}">
+                <input type="hidden" name="target_host" value="{{ attempt.target_host }}">
+                <button type="submit" class="visibility-button visible">✅ Allow</button>
+              </form>
+              <form action="/admin/beacon-origins/dismiss" method="post" class="visibility-form">
+                <input type="hidden" name="id" value="{{ attempt.id }}">
+                <button type="submit" class="visibility-button hidden">✖️ Dismiss</button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </section>
+
+      <section class="search-container admin-section">
+        <h2 class="admin-section-title">✅ Allowed Beacon Origins</h2>
+        {% if allowed_beacon_origins | length == 0 %}
+        <p style="font-size:0.85rem;color:#888;">No beacon origins have been allowlisted yet.</p>
+        {% else %}
+        <div class="app-visibility-list">
+          {% for origin in allowed_beacon_origins %}
+          <div class="app-visibility-item">
+            <div class="app-info">
+              <span style="font-weight:600;">{{ origin.origin_host }} → {{ origin.target_host }}</span>
+            </div>
+            <form action="/admin/beacon-origins/revoke" method="post" class="visibility-form"
+                  onsubmit="return confirm('Revoke beacon access for {{ origin.origin_host }} → {{ origin.target_host }}?');">
+              <input type="hidden" name="id" value="{{ origin.id }}">
+              <button type="submit" class="visibility-button hidden">🗑️ Revoke</button>
+            </form>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </section>
     </div>
   </main>
 
