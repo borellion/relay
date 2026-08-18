@@ -55,14 +55,6 @@ pub async fn get_all_apps(data: &Data<AppState>) -> Result<Vec<DbApp>, Error> {
     Ok(apps)
 }
 
-pub async fn get_apps_count(data: &Data<AppState>) -> Result<i64, Error> {
-    let db = &data.db;
-    let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM apps")
-        .fetch_one(db)
-        .await?;
-    Ok(count)
-}
-
 pub async fn create_app(
     data: &Data<AppState>,
     activitypub_id: String,
@@ -77,6 +69,48 @@ pub async fn create_app(
 ) -> Result<(), Error> {
     let db = &data.db;
     sqlx::query("INSERT INTO apps (activitypub_id, url, name, description, is_active, image, is_adult, tags, content_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)")
+        .bind(activitypub_id)
+        .bind(url)
+        .bind(name)
+        .bind(description)
+        .bind(is_active)
+        .bind(image_url)
+        .bind(is_adult)
+        .bind(tags)
+        .bind(content_type)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// Reserve the next app id from the id sequence, so a new local app's
+/// ActivityPub id and slug can be derived from its real row id. The row
+/// count drifts from the ids once apps have been deleted.
+pub async fn get_next_app_id(data: &Data<AppState>) -> Result<i32, Error> {
+    let db = &data.db;
+    let id = sqlx::query_scalar::<_, i64>("SELECT nextval(pg_get_serial_sequence('apps', 'id'))")
+        .fetch_one(db)
+        .await?;
+    Ok(id as i32)
+}
+
+/// Create a new app at an id previously reserved with get_next_app_id
+pub async fn create_app_with_id(
+    data: &Data<AppState>,
+    id: i32,
+    activitypub_id: String,
+    url: String,
+    name: String,
+    description: String,
+    is_active: bool,
+    image_url: String,
+    is_adult: bool,
+    tags: String,
+    content_type: String,
+) -> Result<(), Error> {
+    let db = &data.db;
+    sqlx::query("INSERT INTO apps (id, activitypub_id, url, name, description, is_active, image, is_adult, tags, content_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)")
+        .bind(id)
         .bind(activitypub_id)
         .bind(url)
         .bind(name)
