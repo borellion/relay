@@ -27,8 +27,8 @@ use super::activities::{Create, Follow, Update};
 use super::actors::{DbRelay, Relay};
 use super::apps::{APImage, App, DbApp};
 use super::db::{
-    create_activity, create_app, get_activities_count, get_activity_by_id, get_all_apps,
-    get_all_relays, get_app_by_base_url, get_app_by_id, get_app_by_slug, get_apps_count,
+    create_activity, create_app_with_id, get_activities_count, get_activity_by_id, get_all_apps,
+    get_all_relays, get_app_by_base_url, get_app_by_id, get_app_by_slug, get_next_app_id,
     get_relay_by_id, get_relay_followers, get_system_user, mark_app_verified, set_app_slug,
     delete_app, delete_apps_bulk, set_app_content_type, set_verification_code, slug_exists, toggle_app_visibility, update_app, update_app_details,
     allow_beacon_origin, dismiss_beacon_origin_attempt, get_allowed_beacon_origins,
@@ -430,13 +430,6 @@ async fn new_beacon(
         }
     };
     let domain = system_user.ap_id.inner().as_str();
-    let apps_count = match get_apps_count(&data).await {
-        Ok(count) => count,
-        Err(e) => {
-            eprintln!("Error fetching apps count: {}", e);
-            return HttpResponse::InternalServerError().body("Failed to get apps count");
-        }
-    };
     let activities_count: i64 = match get_activities_count(&data).await {
         Ok(count) => count,
         Err(e) => {
@@ -565,8 +558,19 @@ async fn new_beacon(
     }
 
     // At this point, it should be certain that the app doesn't already exist.
-    // Create a new app and send the Create activity to following relays
-    let ap_id = format!("{}/beacon/{}", domain, apps_count);
+    // Create a new app and send the Create activity to following relays.
+    // Reserve the row id up front: the ActivityPub id and slug must be derived
+    // from the real id, not the row count, which drifts once rows are deleted.
+    let new_app_id = match get_next_app_id(&data).await {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("Error reserving app id: {}", e);
+            return HttpResponse::InternalServerError().body("Failed to reserve app id");
+        }
+    };
+    // Public numeric routes are offset by one (/world/{n} resolves row id n + 1),
+    // so the beacon number is id - 1
+    let ap_id = format!("{}/beacon/{}", domain, new_app_id - 1);
     let image_url = if image.contains("data:") {
         let image_url = create_local_image(&ap_id, &protocol, &relay_domain, &image);
         if image_url.is_empty() {
@@ -578,9 +582,10 @@ async fn new_beacon(
         image
     };
 
-    match create_app(
+    match create_app_with_id(
         &data,
-        ap_id,
+        new_app_id,
+        ap_id.clone(),
         url,
         name.clone(),
         description,
@@ -595,8 +600,7 @@ async fn new_beacon(
         Ok(_) => {
             // Generate and set a unique slug for the new app
             let slug = generate_unique_slug(&data, &name).await;
-            // App ID is apps_count + 1 since we just created a new one
-            if let Err(e) = set_app_slug(&data, (apps_count + 1) as i32, &slug).await {
+            if let Err(e) = set_app_slug(&data, new_app_id, &slug).await {
                 eprintln!("Error setting slug for new app: {}", e);
             }
         }
@@ -604,7 +608,7 @@ async fn new_beacon(
     };
     let activity = Create {
         actor: ObjectId::parse(domain).unwrap(),
-        object: ObjectId::parse(&format!("{}/beacon/{}", domain, apps_count)).unwrap(),
+        object: ObjectId::parse(&ap_id).unwrap(),
         kind: CreateType::Create,
         id: Url::from_str(&format!("{}/activities/{}", domain, activities_count)).unwrap(),
     };
